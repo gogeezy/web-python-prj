@@ -1,0 +1,93 @@
+name: HW35 S3 Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-artifact:
+    name: Build and upload artifact to S3
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t web-python-prj:${{ github.sha }} .
+
+      - name: Create artifact
+        run: |
+          docker save web-python-prj:${{ github.sha }} | gzip > web-python-prj.tar.gz
+          ls -lh web-python-prj.tar.gz
+
+      - name: Upload artifact to Yandex Object Storage
+        run: |
+          IAM_TOKEN=$(curl -s \
+            -H "Metadata-Flavor: Google" \
+            http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+
+          curl -f -X PUT \
+            -H "Authorization: Bearer $IAM_TOKEN" \
+            --upload-file web-python-prj.tar.gz \
+            "https://storage.yandexcloud.net/hw-artifacts-gogeezy/web-python-prj-${{ github.sha }}.tar.gz"
+
+  deploy:
+    name: Deploy to private app-vm
+    runs-on: self-hosted
+    needs: build-artifact
+
+    steps:
+      - name: Download artifact from S3
+        run: |
+          IAM_TOKEN=$(curl -s \
+            -H "Metadata-Flavor: Google" \
+            http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+
+          curl -f \
+            -H "Authorization: Bearer $IAM_TOKEN" \
+            -o web-python-prj.tar.gz \
+            "https://storage.yandexcloud.net/hw-artifacts-gogeezy/web-python-prj-${{ github.sha }}.tar.gz"
+
+      - name: Copy artifact to private VM
+        run: |
+          scp \
+            -i ~/.ssh/app_deploy \
+            -o StrictHostKeyChecking=no \
+            web-python-prj.tar.gz \
+            yc-user@10.10.2.5:/tmp/web-python-prj.tar.gz
+
+      - name: Deploy application
+        run: |
+          ssh \
+            -i ~/.ssh/app_deploy \
+            -o StrictHostKeyChecking=no \
+            yc-user@10.10.2.5 <<'EOF'
+
+          gunzip -c /tmp/web-python-prj.tar.gz | docker load
+
+          docker rm -f web-python-prj 2>/dev/null || true
+
+          IMAGE_ID=$(docker images \
+            --format '{{.Repository}}:{{.Tag}}' \
+            | grep '^web-python-prj:' \
+            | head -1)
+
+          docker run -d \
+            --name web-python-prj \
+            --restart unless-stopped \
+            -p 5000:5000 \
+            "$IMAGE_ID"
+
+          rm -f /tmp/web-python-prj.tar.gz
+          EOF
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          curl -f http://10.10.2.5:5000/health
