@@ -1,0 +1,23 @@
+replicaCount: 2
+
+image:
+  repository: web-python-prj
+  tag: k8s
+  pullPolicy: Never
+
+service:
+  type: NodePort
+  port: 5000
+
+containerPort: 5000
+
+probes:
+  readiness:
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 5
+
+  liveness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
