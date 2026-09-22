@@ -35,11 +35,37 @@ jobs:
             -H "Authorization: Bearer $IAM_TOKEN" \
             --upload-file web-python-prj.tar.gz \
             "https://storage.yandexcloud.net/hw-artifacts-gogeezy/web-python-prj-${{ github.sha }}.tar.gz"
+  check-infrastructure:
+    name: Check Terraform infrastructure
+    runs-on: self-hosted
+    needs: build-artifact
+
+    steps:
+      - name: Check Terraform VM
+        run: |
+          echo "Checking Terraform-managed infrastructure..."
+
+          for i in {1..12}; do
+            if curl -fsS --connect-timeout 5 \
+              http://10.20.1.19:8080/health; then
+              echo
+              echo "Infrastructure is ready"
+              exit 0
+            fi
+
+            echo "Infrastructure is not ready yet. Attempt $i/12"
+            sleep 5
+          done
+
+          echo "Infrastructure readiness check failed"
+          exit 1
 
   deploy:
     name: Deploy to private app-vm
     runs-on: self-hosted
-    needs: build-artifact
+    needs:
+      - build-artifact
+      - check-infrastructure
 
     steps:
       - name: Download artifact from S3
