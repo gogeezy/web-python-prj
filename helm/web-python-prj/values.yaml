@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: web-python-prj
-  tag: k8s
+  tag: monitoring
   pullPolicy: Never
 
 service:
