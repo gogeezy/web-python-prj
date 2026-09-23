@@ -1,7 +1,8 @@
+import json
 import logging
 import os
-
 import psycopg
+
 from flasgger import Swagger
 from flask import Flask, Response, request
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
@@ -63,6 +64,19 @@ def create_app():
             endpoint=request.path,
             status=response.status_code,
         ).inc()
+
+        print(
+            json.dumps(
+                {
+                    "event": "http_request",
+                    "http_method": request.method,
+                    "http_path": request.path,
+                    "http_status": response.status_code,
+                }
+            ),
+            flush=True,
+        )
+
         return response
 
     @app.get("/health")
@@ -86,6 +100,10 @@ def create_app():
         except psycopg.Error as error:
             app.logger.error("Database check failed: %s", error)
             return {"status": "error", "database": "unavailable"}, 503
+
+    @app.get("/test-500")
+    def test_500():
+        return {"status": "error", "message": "Test internal server error"}, 500
 
     @app.get("/metrics")
     def metrics():
